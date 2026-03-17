@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["@violentmonkey/types"],
+    "noEmit": true                    // We only use TS for checking — bundler emits JS
+  },
+  "include": ["src/**/*"]
+}
