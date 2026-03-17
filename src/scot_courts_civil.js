@@ -1,4 +1,5 @@
 /// <reference types="@violentmonkey/types" />
+/// <reference path="../lib/GM_config/types/index.d.ts" />
 // ==UserScript==
 // @name         Scot Courts - Civil Case File Sync
 // @namespace    https://github.com/aybarsm
@@ -17,7 +18,7 @@
 // @grant        GM_addStyle
 // @grant        GM_getResourceText
 // @grant        GM_notification
-// @require      https://github.com/PRO-2684/GM_config/releases/download/v1.2.2/config.min.js#md5=c45f9b0d19ba69bb2d44918746c4d7ae
+// @require      https://greasyfork.org/scripts/420683-gm-config-sizzle/code/GM_config_sizzle.js?version=894369
 // ==/UserScript==
 
 const configSpec = {
