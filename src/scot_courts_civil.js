@@ -1,11 +1,11 @@
+/// <reference types="@violentmonkey/types" />
 // ==UserScript==
 // @name         Scot Civil Case File Sync
 // @namespace    https://github.com/aybarsm
 // @version      0.4
 // @description  Scot Civil Case File Sync
 // @author       aybarsm
-// @match        https://civilonline.scotcourts.gov.uk/my-cases
-// @match        https://civilonline.scotcourts.gov.uk/case-tracker*
+// @match        https://civilonline.scotcourts.gov.uk/*
 // @require      https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js
 // @resource     BOOTSTRAP_CSS https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css
 // @grant        GM_log
@@ -56,7 +56,7 @@ const vmSettingsDefault = {
 
 (function() {
     'use strict';
-
+    
     GM_config.init({
         id: "ScotCourts_Civil",
         title: "Scot Courts - Civil",
