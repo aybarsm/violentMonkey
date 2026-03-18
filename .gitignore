@@ -24,6 +24,8 @@ Thumbs.db
 /.vagrant
 /bin
 # Dev
+lib/*
+!lib/**/types
 dev/
 app/Dev
 app/Commands/Test.php
