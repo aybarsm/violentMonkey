@@ -16,26 +16,30 @@
 // @grant        GM_addValueChangeListener
 // @grant        GM_log
 // @grant        GM.xmlHttpRequest
+// @grant        GM_xmlHttpRequest
 // @grant        GM_addStyle
 // @grant        GM_getResourceText
-// @grant        GM_notification
 // @grant        GM_download
 // @require      https://greasyfork.org/scripts/420683-gm-config-sizzle/code/GM_config_sizzle.js?version=894369
+// @require      https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/not-a-toast.umd.js
+// @resource     CSS_TOAST https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/style.css
+// @require      https://cdn.jsdelivr.net/npm/webdav@5.9.0/dist/web/index.min.js
 // ==/UserScript==
+
+GM_addStyle(GM_getResourceText("CSS_TOAST"));
 
 const defaults__ = {
     'meta': {
         'settings': {
             'registered': false,
         },
-        'case': {
-            'reference': null,
-        },
         'urlSearchParams': null,
     },
     'notifications': {
-        'title': 'Scot Courts - Civil',
-        'silent': false,
+        // 'title': 'Scot Courts - Civil',
+        // 'silent': false,
+        'theme': 'carbon',
+        'position': 'top-right',
     },
     'config': {
         'id': 'ScriptSettings',
@@ -47,10 +51,11 @@ const defaults__ = {
                 'default': '',
                 'section': 'WebDAV Synchronisation Settings',
             },
-            'isWebdavAnon': {
-                'label': 'Anonymous Account',
-                'type': 'checkbox',
-                'default': false,
+            'webdavAuth': {
+                'label': 'WebDAV Authentication',
+                'type': 'select',
+                'options': ['None', 'Basic', 'Token'],
+                'default': 'None',
             },
             'webdavUser': {
                 'label': 'WebDAV Username',
@@ -62,11 +67,11 @@ const defaults__ = {
                 'type': 'text',
                 'default': '',
             },
-            'isDevMode': {
+            'devMode': {
                 'label': 'Dev Mode',
                 'type': 'checkbox',
-                'default': false,
-                'section': 'Development Settings',
+                'options': ['Disabled', 'Enabled'],
+                'default': 'Disabled',
             },
             'devReference': {
                 'label': 'Case Reference',
@@ -99,14 +104,17 @@ const defaults__ = {
                 saveBtn.parentNode.insertBefore(saveAndCloseBtn, saveBtn.nextSibling);
             },
             'save': function () {
-                Utils.notify({'text': 'Settings saved.'});
+                Utils.notify({'message': 'Settings saved.'});
             },
             'reset': function () {
-                Utils.notify({'text': 'Settings restored to defaults.'});
+                Utils.notify({'message': 'Settings restored to defaults.'});
             },
         },
         'css': `
             #ScriptSettings input[type="text"] {
+                width: 100%;
+            }
+            #ScriptSettings select {
                 width: 100%;
             }
             #ScriptSettings .config_var {
@@ -156,20 +164,46 @@ class Utils {
         }
     }
 
-    static #strEach(str, callback) {
-        for (let idx = 0; idx < text.length; idx++) {
-            callback(str[idx], idx)
-        }
-    }
+    static pathJoin(...segments) {
+        if (segments.length == 0) return null;
 
-    static isStrUppercase(value) {
-        return /^[A-Z].*$/.test(value)
+        let meta = {
+            'initial': null,
+            'parts': [],
+        }
+
+        for (const [idx, val] of segments.entries()) {
+            let segment = structuredClone(val).trim().replace(/^\/+|\/+$/g, '').trim();
+
+            if (idx == 0 && segment.startsWith('http:')){
+                meta.initial = 'http://';
+            } else if (idx == 0 && segment.startsWith('https:')){
+                meta.initial = 'https://';
+            }
+
+            if (idx == 0 && meta.initial){
+                segment = this.strChopStart(segment, ...['http:', 'https:']).trim().replace(/^\/+|\/+$/g, '').trim();
+            }
+
+            if (segment == '') continue;
+
+            segment.split('/').forEach((seg_) => {
+                seg_ = seg_.trim().replace(/^\/+|\/+$/g, '').trim();
+                
+                if (seg_ != ''){
+                    meta.parts.push(seg_);
+                }
+            });
+        }
+
+        if (meta.initial) meta.parts.unshift(meta.initial);
+
+        return meta.parts.join('/');
     }
 
     static #strCasePrep(value) {
         return value
             .replace(/[^a-zA-Z0-9]+/g, ' ')
-            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
             .replace(/[-_\s]+/g, ' ')
             .trim();
     }
@@ -178,8 +212,19 @@ class Utils {
         if (!value) return '';
 
         return this.#strCasePrep(value)
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .trim()
             .split(' ')
             .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join('');
+    }
+
+    static strSnake(value) {
+        if (!value) return '';
+
+        return this.#strCasePrep(value)
+            .split(' ')
+            .map((word, idx) => (idx === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()))
             .join('');
     }
 
@@ -215,7 +260,7 @@ class Utils {
         try {
             url = new URL(doc['fileUrl']);
         }catch (error) {
-            this.notify({'text': `Resolve Document File Extension Failed: ${doc['fileUrl']}`});
+            this.notify({'message': `Resolve Document File Extension Failed: ${doc['fileUrl']}`});
             this.log(`[${doc['fileUrl']}]`, error);
             return null; 
         }
@@ -224,7 +269,7 @@ class Utils {
         const fileExtIndex = fileUrlName.lastIndexOf('.');
         
         if (fileExtIndex <= 0) {
-            this.notify({'text': `Resolve Document File Extension Failed: ${doc['fileUrl']}`});
+            this.notify({'message': `Resolve Document File Extension Failed: ${doc['fileUrl']}`});
             this.log(`[${doc['fileUrl']}]`, doc);
             return null; 
         }
@@ -236,10 +281,10 @@ class Utils {
     }
 
     static notify(options = {}) {
-        if (!Object.hasOwn(options, 'text') || options.text.trim() == '') return;
+        if (!Object.hasOwn(options, 'message') || options.message.trim() == '') return;
 
         let defaults = defaults__['notifications'];
-        GM_notification(this.deepMergeImmutable(defaults, options))
+        toast(this.deepMergeImmutable(defaults, options))
     }
 
     static log(...args) {
@@ -248,63 +293,76 @@ class Utils {
     }
 
     static #httpFailed(options, context) {
-        this.notify({'text': `${options.method} Request Failed: ${options.url}`, 'silent': false});
+        this.notify({'message': `${options.method} Request Failed: ${options.url}`, 'silent': false});
         this.log(`[${options.method} : ${options.url}]`, context);
     }
 
     static #httpPrepare(options, resolver) {
-        options.onload = (response) => {
-            if (response.status >= 200 && response.status < 300) {
-                resolver(response);
-            } else {
-                this.#httpFailed(options, response);
+        if (Object.hasOwn(options, 'onload')){
+            options.onload = (response) => {
+                if (response.status >= 200 && response.status < 300) {
+                    resolver(response);
+                } else {
+                    this.#httpFailed(options, response);
+                    resolver(null);
+                }
+            };
+        }
+        
+        if (Object.hasOwn(options, 'onerror')){
+            options.onerror = (error) => {
+                this.#httpFailed(options, error);
+                resolver(null);
+            };
+        }
+        
+        if (Object.hasOwn(options, 'ontimeout')){
+            options.ontimeout = () => {
+                this.#httpFailed(options, new Error('Request timed out'));
                 resolver(null);
             }
-        };
-        
-        options.onerror = (error) => {
-            this.#httpFailed(options, error);
-            resolver(null);
-        };
-
-        options.ontimeout = () => {
-            this.#httpFailed(options, new Error('Request timed out'));
-            resolver(null);
         }
-
-        options.onabort = () => {
-            this.#httpFailed(options, new Error('Request timed out'));
-            resolver(null);
+        
+        if (Object.hasOwn(options, 'onabort')){
+            options.onabort = () => {
+                this.#httpFailed(options, new Error('Request timed out'));
+                resolver(null);
+            }
         }
 
         return options;
     }
 
-    static #httpRequest(options, method) {
+    static httpRequest(options = {}) {
+        options.method = options.method.toUpperCase();
         return new Promise((resolve) => {
-            options.method = method.toUpperCase();
             GM.xmlHttpRequest(this.#httpPrepare(options, resolve));
         });
     }
 
-    static httpGet(options) {
-        return this.#httpRequest(options, 'GET');
+    static httpGet(options = {}) {
+        options.method = 'GET';
+        return this.httpRequest(options);
     }
 
-    static httpPost(options) {
-        return this.#httpRequest(options, 'POST');
+    static httpPost(options = {}) {
+        options.method = 'POST';
+        return this.httpRequest(options);
     }
 
-    static httpPut(options) {
-        return this.#httpRequest(options, 'PUT');
+    static httpPut(options = {}) {
+        options.method = 'PUT';
+        return this.httpRequest(options);
     }
 
-    static httpPatch(options) {
-        return this.#httpRequest(options, 'PATCH');
+    static httpPatch(options = {}) {
+        options.method = 'PATCH';
+        return this.httpRequest(options);
     }
 
-    static httpDelete(options) {
-        return this.#httpRequest(options, 'DELETE');
+    static httpDelete(options = {}) {
+        options.method = 'DELETE';
+        return this.httpRequest(options);
     }
 }
 
@@ -315,23 +373,26 @@ class ScriptController {
         this.#meta = defaults__['meta'];
         this.GMConfigInit();
         this.#meta.urlSearchParams = new URLSearchParams(window.location.search);
-        this.#meta.case.reference = this.getUrlSearchParams().get('reference');
     }
 
-    is(of) {
-        of = Utils.strStudly(Utils.strChopStart(of.trim(), 'is'));
+    is(of, what = None) {
+        of = Utils.strSnake(of);
         
-        if (of == 'CasePage') {
+        if (of == 'casePage') {
             return location.pathname.startsWith('/case-tracker');
-        } else if (['DevMode', 'WebdavAnon'].indexOf(of) > -1) {
-            return GM_config.get(`is${of}`);
         }
-
-        // if (of == 'devMode') {
-        //     return GM_config.get('isDevMode');
-        // } else if (of == 'webdavAnon') {
-        //     return GM_config.get('isWebdavAnon');
-        // } else 
+        
+        if (what){
+            return GM_config.get(of) === what;
+        }else {
+            field = GM_config.fields[of]
+            isFieldBoolSelect = field['type'] === 'select' && field['options'].indexOf('Enabled') > -1 && field['options'].indexOf('Disabled') > -1
+            if (isFieldBoolSelect){
+                return GM_config.get(of) === 'Enabled';
+            } else {
+                Utils.notify(`Value if required to compare [${of}] field.`)
+            }
+        }
     }
 
     getUrlSearchParams() {
@@ -339,8 +400,13 @@ class ScriptController {
     }
 
     getCase(of = '') {
+        of = of.trim().toLowerCase();
+
         if (of.length == 0) {
             return this.#meta.case
+        } else if (['reference', 'ref'].indexOf(of) > -1){
+            const caseRef = (!this.is('devMode') ? this.getUrlSearchParams().get('reference') : GM_config.get('devReference')).trim();
+            return caseRef == '' ? 'unknownCaseReference' : caseRef;
         } else if (of == 'docs'){
             if (this.is('devMode')){
                 return Utils.httpGet({
@@ -354,6 +420,8 @@ class ScriptController {
             }
 
             return [];
+        }else if (of == 'webdavurl'){
+            return Utils.pathJoin(GM_config.get('webdavUrl'), 'ScotCortsCivil', this.getCase('ref'));
         }
 
         return this.#meta.case[of]
@@ -382,23 +450,29 @@ class ScriptController {
             if (wasOpen) GM_config.open();
         }
     }
+
+    webdav(options = {}) {
+        let base = {
+            'headers': {},
+        }
+
+        if (!this.is('webdavAnon')){
+            const webdavAuth = btoa(`${GM_config.get('webdavUser')}:${GM_config.get('webdavPass')}`);
+            base.headers['Authorization'] = `Basic ${webdavAuth}`;
+        }
+
+        base = Utils.deepMergeImmutable(options, base);
+        return Utils.httpRequest(base, base);
+    }
 }
 
 const vm = new ScriptController();
 
+async function httpReqq(options = {}) {
+    return await GM.xmlHttpRequest(options);
+}
+
 (function() {
     'use strict';
     
-    if (!vm.is('devMode') && !vm.is('casePage')){
-        return;
-    }
-
-    vm.getCase('docs').then((docs_) => {
-        let resolved = []
-        for (const doc of docs_){
-            resolved.push(Utils.resolveDocumentFileName(doc));
-        }
-        Utils.log('Resolved Docs: ', resolved)
-    });
-
 })();
