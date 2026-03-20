@@ -3,5 +3,5 @@
 	url = https://github.com/sizzlemctwizzle/GM_config.git
 [submodule "lib/webdav-client"]
 	path = lib/webdav-client
-	url = https://github.com/perry-mitchell/webdav-client.git
+	url = https://github.com/perry-mitchell/webdav-client
 	branch = v5.9.0
