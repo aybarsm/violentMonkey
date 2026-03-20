@@ -1,5 +1,6 @@
 /// <reference types="@violentmonkey/types" />
 /// <reference path="../lib/GM_config/types/index.d.ts" />
+/// <reference types="webdav" />
 // ==UserScript==
 // @name         Scot Courts - Civil
 // @namespace    https://github.com/aybarsm
@@ -23,7 +24,7 @@
 // @require      https://greasyfork.org/scripts/420683-gm-config-sizzle/code/GM_config_sizzle.js?version=894369
 // @require      https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/not-a-toast.umd.js
 // @resource     CSS_TOAST https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/style.css
-// @require      https://gist.githubusercontent.com/aybarsm/19817dd8ed2b5b397c4bee696bb9ba1c/raw/ba89e4d7460f4de9320d0a484caeef6d4020cd05/webdav-client.5.9.0.min.js
+// @require      https://gist.githubusercontent.com/aybarsm/19817dd8ed2b5b397c4bee696bb9ba1c/raw/6fcfa3e559ea06d325051153745bd01d13954421/webdav.5.9.0.min.js
 // ==/UserScript==
 
 GM_addStyle(GM_getResourceText("CSS_TOAST"));
@@ -475,5 +476,9 @@ async function httpReqq(options = {}) {
 (function() {
     'use strict';
     
-    
+    const client = WebDav.createClient();
+
+    console.log({
+        'client': client,
+    });
 })();
