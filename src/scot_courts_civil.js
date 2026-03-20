@@ -1,6 +1,6 @@
 /// <reference types="@violentmonkey/types" />
 /// <reference path="../lib/GM_config/types/index.d.ts" />
-/// <reference types="webdav" />
+/// <reference path="../lib/webdav/types/index.d.ts" />
 // ==UserScript==
 // @name         Scot Courts - Civil
 // @namespace    https://github.com/aybarsm
@@ -468,10 +468,6 @@ class ScriptController {
 }
 
 const vm = new ScriptController();
-
-async function httpReqq(options = {}) {
-    return await GM.xmlHttpRequest(options);
-}
 
 (function() {
     'use strict';
