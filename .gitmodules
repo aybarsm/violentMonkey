@@ -1,7 +1,3 @@
 [submodule "lib/GM_config"]
 	path = lib/GM_config
 	url = https://github.com/sizzlemctwizzle/GM_config.git
-[submodule "lib/webdav-client"]
-	path = lib/webdav-client
-	url = https://github.com/perry-mitchell/webdav-client.git
-	branch = v5.9.0
