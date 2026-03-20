@@ -35,6 +35,7 @@ const defaults__ = {
             'registered': false,
         },
         'urlSearchParams': null,
+        'webdavClient': null,
     },
     'notifications': {
         // 'title': 'Scot Courts - Civil',
@@ -52,11 +53,16 @@ const defaults__ = {
                 'default': '',
                 'section': 'WebDAV Synchronisation Settings',
             },
+            'webdavPath': {
+                'label': 'WebDAV Path',
+                'type': 'text',
+                'default': '/ScotCourtsCivil',
+            },
             'webdavAuth': {
                 'label': 'WebDAV Authentication',
                 'type': 'select',
-                'options': ['None', 'Basic', 'Token'],
-                'default': 'None',
+                'options': ['Auto', 'Digest', 'Token'],
+                'default': 'Auto',
             },
             'webdavUser': {
                 'label': 'WebDAV Username',
@@ -70,7 +76,7 @@ const defaults__ = {
             },
             'devMode': {
                 'label': 'Dev Mode',
-                'type': 'checkbox',
+                'type': 'select',
                 'options': ['Disabled', 'Enabled'],
                 'default': 'Disabled',
             },
@@ -87,8 +93,8 @@ const defaults__ = {
         },
         'events': {
             'open': function(doc) {
-                if (doc.getElementById('ScriptSettings_saveAndCloseBtn')) {
-                    return; 
+                if (GM_config._meta['btnSaveAndClose'] === true) {
+                    return;
                 }
                 
                 const saveBtn = doc.getElementById('ScriptSettings_saveBtn');
@@ -103,6 +109,7 @@ const defaults__ = {
                 });
 
                 saveBtn.parentNode.insertBefore(saveAndCloseBtn, saveBtn.nextSibling);
+                GM_config._meta['btnSaveAndClose'] = true;
             },
             'save': function () {
                 Utils.notify({'message': 'Settings saved.'});
@@ -154,6 +161,16 @@ class Utils {
         return output;
     }
 
+    static isValidUrl(str) {
+        if (typeof str !== 'string') return false;
+        
+        try {
+            return new URL(str);
+        } catch (error) {
+            return false;
+        }
+    }
+
     static isValidJson(str) {
         if (typeof str !== 'string') return false;
 
@@ -165,7 +182,7 @@ class Utils {
         }
     }
 
-    static pathJoin(...segments) {
+    static pathSegments(...segments) {
         if (segments.length == 0) return null;
 
         let meta = {
@@ -197,9 +214,13 @@ class Utils {
             });
         }
 
-        if (meta.initial) meta.parts.unshift(meta.initial);
+        if (meta.initial) meta.parts[0] = `${meta.initial}${meta.parts[0]}`;
 
-        return meta.parts.join('/');
+        return meta.parts;
+    }
+
+    static pathJoin(...segments) {
+        return this.pathSegments(...segments).join('/');
     }
 
     static #strCasePrep(value) {
@@ -220,10 +241,11 @@ class Utils {
             .join('');
     }
 
-    static strSnake(value) {
+    static strCamel(value) {
         if (!value) return '';
 
         return this.#strCasePrep(value)
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
             .split(' ')
             .map((word, idx) => (idx === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()))
             .join('');
@@ -335,10 +357,15 @@ class Utils {
     }
 
     static httpRequest(options = {}) {
-        options.method = options.method.toUpperCase();
-        return new Promise((resolve) => {
-            GM.xmlHttpRequest(this.#httpPrepare(options, resolve));
-        });
+        if (Object.hasOwn(options, 'before')){
+            const before = options.before;
+            delete options['before'];
+            return new Promise(() => before())
+            .then(
+                new Promise((resolveRequest) => GM.xmlHttpRequest(this.#httpPrepare(options, resolveRequest)))
+            );
+        }
+        return new Promise((resolveRequest) => GM.xmlHttpRequest(this.#httpPrepare(options, resolveRequest)));
     }
 
     static httpGet(options = {}) {
@@ -365,6 +392,10 @@ class Utils {
         options.method = 'DELETE';
         return this.httpRequest(options);
     }
+
+    static isConfigFieldSelectBool(field) {
+        return field['settings']['type'] === 'select' && field['settings']['options'].indexOf('Enabled') > -1 && field['settings']['options'].indexOf('Disabled') > -1
+    }
 }
 
 class ScriptController {
@@ -376,24 +407,26 @@ class ScriptController {
         this.#meta.urlSearchParams = new URLSearchParams(window.location.search);
     }
 
-    is(of, what = None) {
-        of = Utils.strSnake(of);
+    is(of, what = null) {
+        const fieldName = Utils.strCamel(of)
         
-        if (of == 'casePage') {
-            return location.pathname.startsWith('/case-tracker');
+        if (fieldName == 'casePage') return location.pathname.startsWith('/case-tracker');
+
+        const field = GM_config.fields[fieldName];
+        
+        if (typeof field === 'undefined') {
+            Utils.notify({'message': `Config field name [${of}] is invalid!`});
+            return null;
         }
         
-        if (what){
-            return GM_config.get(of) === what;
-        }else {
-            field = GM_config.fields[of]
-            isFieldBoolSelect = field['type'] === 'select' && field['options'].indexOf('Enabled') > -1 && field['options'].indexOf('Disabled') > -1
-            if (isFieldBoolSelect){
-                return GM_config.get(of) === 'Enabled';
-            } else {
-                Utils.notify(`Value if required to compare [${of}] field.`)
-            }
-        }
+        if (what) return GM_config.get(of) === what;
+
+        if (Utils.isConfigFieldSelectBool(field)){
+            return GM_config.get(fieldName) === 'Enabled';
+        } else {
+            Utils.notify(`Value if required to compare [${of}] field!`)
+            return null;
+        } 
     }
 
     getUrlSearchParams() {
@@ -422,7 +455,13 @@ class ScriptController {
 
             return [];
         }else if (of == 'webdavurl'){
-            return Utils.pathJoin(GM_config.get('webdavUrl'), 'ScotCortsCivil', this.getCase('ref'));
+            // const parts = [
+            //     GM_config.get('webdavUrl'),
+            //     'ScotCourtsCivil',
+            //     this.getCase('ref').trim(),
+            // ]
+
+            return Utils.pathJoin(GM_config.get('webdavUrl'), GM_config.get('webdavPath'), this.getCase('ref').trim());
         }
 
         return this.#meta.case[of]
@@ -431,6 +470,7 @@ class ScriptController {
     GMConfigInit(extras = {}) {
         if (!this.#meta.settings.registered) {
             GM_config.init(defaults__['config']);
+            GM_config._meta = {}
 
             GM_registerMenuCommand(
                 'Settings',
@@ -452,18 +492,32 @@ class ScriptController {
         }
     }
 
-    webdav(options = {}) {
-        let base = {
-            'headers': {},
+    webdavClient(options = {}) {
+        if (!this.#meta.webdavClient){
+            const remoteUrl = GM_config.get('webdavUrl');
+            
+            if (!Utils.isValidUrl(remoteUrl)){
+                Utils.notify({'message': `WebDav URL [${remoteUrl}] is invalid!`});
+                return null;
+            }
+
+            const authType = GM_config.get('webdavAuth');
+            
+            if (authType === 'Digest') {
+                options['authType'] = WebDav.AuthType.Digest;
+            } else if (authType === 'Token') {
+                options['authType'] = WebDav.AuthType.Token;
+            } else {
+                options['authType'] = WebDav.AuthType.Auto;
+            }
+
+            options['username'] = GM_config.get('webdavUser');
+            options['password'] = GM_config.get('webdavPass');
+
+            this.#meta.webdavClient = WebDav.createClient(remoteUrl, options);
         }
 
-        if (!this.is('webdavAnon')){
-            const webdavAuth = btoa(`${GM_config.get('webdavUser')}:${GM_config.get('webdavPass')}`);
-            base.headers['Authorization'] = `Basic ${webdavAuth}`;
-        }
-
-        base = Utils.deepMergeImmutable(options, base);
-        return Utils.httpRequest(base, base);
+        return this.#meta.webdavClient;
     }
 }
 
@@ -471,10 +525,84 @@ const vm = new ScriptController();
 
 (function() {
     'use strict';
-    
-    const client = WebDav.createClient();
 
-    console.log({
-        'client': client,
-    });
+    // const webdavUrl = vm.getCase('webdavurl');
+    // console.log({
+    //     'url': vm.getCase('webdavurl'),
+    //     'parts': Utils.pathSegments(vm.getCase('webdavurl')),
+    // });
+
+
+    // console.log({
+    //     'webdav': WebDav.target,
+    // });
+
+    // const client = vm.webdavClient({
+    //     'httpAgent': GM.xmlHttpRequest,
+    //     'httpsAgent': GM.xmlHttpRequest,
+    // });
+    // // client.fetcher = (...args) => {
+    // //     console.log({
+    // //         'args': args,
+    // //     })
+    // // }
+    // client.exists('/dev/tmp').then((...args) => {
+    //     console.log({
+    //         'existsArgs': args,
+    //     })
+    // });
+
+    // const httpReqOptions = {
+    //     'url': vm.getCase('webdavurl'),
+    //     // 'url': GM_config.get('webdavUrl'),
+    //     'method': 'PROPFIND',
+    //     'headers': {
+    //         // 'Content-Type': 'application/xml; charset=utf-8',
+    //         'Depth': '0',
+    //     },
+    // }
+
+    // GM.xmlHttpRequest(httpReqOptions).then((response) => {
+        
+    // })
+
+    // console.log(httpReqOptions);
+
+    // let dump = {
+    //     'httpReqOptions': httpReqOptions,
+    // }
+    
+    // Utils.httpRequest(httpReqOptions).then((result) => {
+    //     dump['result'] = result;
+    //     return result;
+    // });
+
+    
+
+    // console.log({
+    //     'webdavUrl': webdavUrl,
+    //     // 'isDevMode': vm.is('devMode'),
+    // })
+    // const client = vm.webdavClient();
+    // client.exists('/ScotCortsCivil').then((result) => {
+    //     console.log('Exists Result ', result);
+    // });
+    // console.log({
+    //     // 'client': client,
+    //     'exists': client.exists('/ScotCortsCivil'),
+    // });
+    // const remoteUrl = GM_config.get('webdavUrl');
+    // let url = null;
+    // try{
+    //     url = new URL(remoteUrl);
+    // }catch (error) {
+    //     url = error;
+    // }
+
+    // console.log({
+    //     'remoteUrl': remoteUrl,
+    //     'url': url,
+    //     'isValid': Utils.isValidUrl(remoteUrl),
+    //     'typeof': typeof remoteUrl,
+    // });
 })();
