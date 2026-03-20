@@ -1,6 +1,5 @@
 /// <reference types="@violentmonkey/types" />
 /// <reference path="../lib/GM_config/types/index.d.ts" />
-/// <reference path="../lib/webdav/types/index.d.ts" />
 // ==UserScript==
 // @name         Scot Courts - Civil
 // @namespace    https://github.com/aybarsm
@@ -24,7 +23,6 @@
 // @require      https://greasyfork.org/scripts/420683-gm-config-sizzle/code/GM_config_sizzle.js?version=894369
 // @require      https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/not-a-toast.umd.js
 // @resource     CSS_TOAST https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/style.css
-// @require      https://gist.githubusercontent.com/aybarsm/19817dd8ed2b5b397c4bee696bb9ba1c/raw/6fcfa3e559ea06d325051153745bd01d13954421/webdav.5.9.0.min.js
 // ==/UserScript==
 
 GM_addStyle(GM_getResourceText("CSS_TOAST"));
@@ -42,6 +40,14 @@ const defaults__ = {
         // 'silent': false,
         'theme': 'carbon',
         'position': 'top-right',
+    },
+    'webdav': {
+        'httpReqOptions': {
+            'headers': {
+                'Content-Type': 'application/xml; charset=utf-8',
+                'Accept': 'application/xml',
+            },
+        },
     },
     'config': {
         'id': 'ScriptSettings',
@@ -316,7 +322,7 @@ class Utils {
     }
 
     static #httpFailed(options, context) {
-        this.notify({'message': `${options.method} Request Failed: ${options.url}`, 'silent': false});
+        this.notify({'message': `${options.method} Request Failed: ${options.url}`});
         this.log(`[${options.method} : ${options.url}]`, context);
     }
 
@@ -398,6 +404,55 @@ class Utils {
     }
 }
 
+class WebDav {
+    static async getHttpReqOptions(extras = {}) {
+        let defaults = defaults__['webdav']['httpReqOptions'];
+        return Utils.deepMergeImmutable(defaults, extras);
+    }
+
+    static async exists(url, depth = 0, options = {}) {
+        let httpReqOptions = await this.getHttpReqOptions(options);
+        httpReqOptions = Utils.deepMergeImmutable(httpReqOptions, {
+            'url': Utils.pathJoin(url),
+            'method': 'PROPFIND',
+            'headers': {
+                'Depth': depth,
+            },
+        });
+        
+        return GM.xmlHttpRequest(httpReqOptions).then((response) => response.status === 207);
+    }
+
+    static async createDirectory(url) {
+        let httpReqOptions = await this.getHttpReqOptions(options);
+        httpReqOptions = deepMergeImmutable(httpReqOptions, {
+            'url': Utils.pathJoin(url),
+            'method': 'MKCOL',
+        });
+
+        return GM.xmlHttpRequest(httpReqOptions).then((response) => response.status === 201);
+    }
+
+    static async ensureDirectoryExists(url) {
+        let ret = true;
+        let parts = [];
+        
+        for (const [idx, part] of Utils.pathSegments(vm.getCase('webdavurl')).entries()) {
+            parts.push(part);
+            
+            if (idx > 0) {
+                console.log('Create: ', Utils.pathJoin(...parts));
+                ret = await this.createDirectory(Utils.pathJoin(...parts));
+                if (ret === false){
+                    break;
+                }
+            }
+        }
+
+        return ret;
+    }
+}
+
 class ScriptController {
     #meta = {}
 
@@ -455,13 +510,11 @@ class ScriptController {
 
             return [];
         }else if (of == 'webdavurl'){
-            // const parts = [
-            //     GM_config.get('webdavUrl'),
-            //     'ScotCourtsCivil',
-            //     this.getCase('ref').trim(),
-            // ]
-
-            return Utils.pathJoin(GM_config.get('webdavUrl'), GM_config.get('webdavPath'), this.getCase('ref').trim());
+            return Utils.pathJoin(
+                GM_config.get('webdavUrl'), 
+                GM_config.get('webdavPath'), 
+                this.getCase('ref').trim()
+            );
         }
 
         return this.#meta.case[of]
@@ -491,118 +544,12 @@ class ScriptController {
             if (wasOpen) GM_config.open();
         }
     }
-
-    webdavClient(options = {}) {
-        if (!this.#meta.webdavClient){
-            const remoteUrl = GM_config.get('webdavUrl');
-            
-            if (!Utils.isValidUrl(remoteUrl)){
-                Utils.notify({'message': `WebDav URL [${remoteUrl}] is invalid!`});
-                return null;
-            }
-
-            const authType = GM_config.get('webdavAuth');
-            
-            if (authType === 'Digest') {
-                options['authType'] = WebDav.AuthType.Digest;
-            } else if (authType === 'Token') {
-                options['authType'] = WebDav.AuthType.Token;
-            } else {
-                options['authType'] = WebDav.AuthType.Auto;
-            }
-
-            options['username'] = GM_config.get('webdavUser');
-            options['password'] = GM_config.get('webdavPass');
-
-            this.#meta.webdavClient = WebDav.createClient(remoteUrl, options);
-        }
-
-        return this.#meta.webdavClient;
-    }
 }
 
 const vm = new ScriptController();
 
-(function() {
+(async function() {
     'use strict';
 
-    // const webdavUrl = vm.getCase('webdavurl');
-    // console.log({
-    //     'url': vm.getCase('webdavurl'),
-    //     'parts': Utils.pathSegments(vm.getCase('webdavurl')),
-    // });
 
-
-    // console.log({
-    //     'webdav': WebDav.target,
-    // });
-
-    // const client = vm.webdavClient({
-    //     'httpAgent': GM.xmlHttpRequest,
-    //     'httpsAgent': GM.xmlHttpRequest,
-    // });
-    // // client.fetcher = (...args) => {
-    // //     console.log({
-    // //         'args': args,
-    // //     })
-    // // }
-    // client.exists('/dev/tmp').then((...args) => {
-    //     console.log({
-    //         'existsArgs': args,
-    //     })
-    // });
-
-    // const httpReqOptions = {
-    //     'url': vm.getCase('webdavurl'),
-    //     // 'url': GM_config.get('webdavUrl'),
-    //     'method': 'PROPFIND',
-    //     'headers': {
-    //         // 'Content-Type': 'application/xml; charset=utf-8',
-    //         'Depth': '0',
-    //     },
-    // }
-
-    // GM.xmlHttpRequest(httpReqOptions).then((response) => {
-        
-    // })
-
-    // console.log(httpReqOptions);
-
-    // let dump = {
-    //     'httpReqOptions': httpReqOptions,
-    // }
-    
-    // Utils.httpRequest(httpReqOptions).then((result) => {
-    //     dump['result'] = result;
-    //     return result;
-    // });
-
-    
-
-    // console.log({
-    //     'webdavUrl': webdavUrl,
-    //     // 'isDevMode': vm.is('devMode'),
-    // })
-    // const client = vm.webdavClient();
-    // client.exists('/ScotCortsCivil').then((result) => {
-    //     console.log('Exists Result ', result);
-    // });
-    // console.log({
-    //     // 'client': client,
-    //     'exists': client.exists('/ScotCortsCivil'),
-    // });
-    // const remoteUrl = GM_config.get('webdavUrl');
-    // let url = null;
-    // try{
-    //     url = new URL(remoteUrl);
-    // }catch (error) {
-    //     url = error;
-    // }
-
-    // console.log({
-    //     'remoteUrl': remoteUrl,
-    //     'url': url,
-    //     'isValid': Utils.isValidUrl(remoteUrl),
-    //     'typeof': typeof remoteUrl,
-    // });
 })();
