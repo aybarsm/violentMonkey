@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/aybarsm/violentMonkey#readme",
   "devDependencies": {
-    "@violentmonkey/types": "^0.3.2"
+    "@violentmonkey/types": "^0.3.2",
+    "webdav": "^5.9.0"
   }
 }
