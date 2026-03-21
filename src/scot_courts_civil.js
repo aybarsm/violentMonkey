@@ -23,9 +23,87 @@
 // @require      https://greasyfork.org/scripts/420683-gm-config-sizzle/code/GM_config_sizzle.js?version=894369
 // @require      https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/not-a-toast.umd.js
 // @resource     CSS_TOAST https://cdn.jsdelivr.net/npm/not-a-toast@1.1.5/dist/style.css
+// @resource     CSS_PICO https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css
 // ==/UserScript==
 
-GM_addStyle(GM_getResourceText("CSS_TOAST"));
+const htmlCaseFilesContainer = `
+<dialog id="caseFilesContainer">
+  <article>
+    <header>
+      <button aria-label="Close" rel="prev" class="close-modal" onclick="document.getElementById('caseFiles').removeAttribute('open')"></button>
+      <h3>Case Files</h3>
+    </header>
+    <div class="text-center"><h3>Loading Case Files</h3><span aria-busy="true"></span></div>
+    <footer>
+      
+    </footer>
+  </article>
+</dialog>`;
+
+const htmlCss = `
+    :root {
+        --pico-font-size: 100%;
+    }
+    
+    dialog article {
+        max-width: 75% !important;
+        max-height: 75% !important;
+    }
+
+    .text-center {;
+        text-align: center !important;
+    }
+    
+    .fs-xsm {
+        --pico-font-size: 0.2rem;
+        font-size: var(--pico-font-size) !important;
+    }
+    
+    .fs-sm {
+        --pico-font-size: 0.4rem;
+        font-size: var(--pico-font-size) !important;
+    }
+
+    .fs-md {
+        --pico-font-size: 0.6rem;
+        font-size: var(--pico-font-size) !important;
+    }
+
+    .fs-lg {
+        --pico-font-size: 0.8rem;
+        font-size: var(--pico-font-size) !important;
+    }
+    
+    .fs-xlg {
+        --pico-font-size: 1rem;
+        font-size: var(--pico-font-size) !important;
+    }
+
+    .btn-xsm {
+        --pico-form-element-spacing-vertical: 0.15rem;
+        --pico-form-element-spacing-horizontal: 0.2rem;
+    }
+    
+    .btn-sm {
+        --pico-form-element-spacing-vertical: 0.30rem;
+        --pico-form-element-spacing-horizontal: 0.4rem;
+    }
+
+    .btn-md {
+        --pico-form-element-spacing-vertical: 0.45rem;
+        --pico-form-element-spacing-horizontal: 0.6rem;
+    }
+
+    .btn-lg {
+        --pico-form-element-spacing-vertical: 0.6rem;
+        --pico-form-element-spacing-horizontal: 0.75rem;
+    }
+
+    .btn-xlg {
+        --pico-form-element-spacing-vertical: 0.75rem;
+        --pico-form-element-spacing-horizontal: 1rem;
+    }
+`;
 
 const defaults__ = {
     'meta': {
@@ -34,10 +112,9 @@ const defaults__ = {
         },
         'urlSearchParams': null,
         'webdavClient': null,
+        'cases': {},
     },
     'notifications': {
-        // 'title': 'Scot Courts - Civil',
-        // 'silent': false,
         'theme': 'carbon',
         'position': 'top-right',
     },
@@ -67,8 +144,8 @@ const defaults__ = {
             'webdavAuth': {
                 'label': 'WebDAV Authentication',
                 'type': 'select',
-                'options': ['Auto', 'Digest', 'Token'],
-                'default': 'Auto',
+                'options': ['None', 'Digest'],
+                'default': 'None',
             },
             'webdavUser': {
                 'label': 'WebDAV Username',
@@ -144,27 +221,89 @@ const defaults__ = {
     }
 }
 
+GM_addStyle(GM_getResourceText("CSS_TOAST"));
+GM_addStyle(GM_getResourceText("CSS_PICO"));
+GM_addStyle(htmlCss);
+
+const gmContainer = document.createElement('div');
+gmContainer.id = 'gmContainer';
+gmContainer.innerHTML = htmlCaseFilesContainer;
+document.body.appendChild(gmContainer);
+
+const caseFilesContainer = document.getElementById('caseFilesContainer');
+const caseFilesHeader = caseFilesContainer.querySelector('article > header');
+const caseFilesBody = caseFilesContainer.querySelector('article > div');
+const caseFilesFooter = caseFilesContainer.querySelector('article > footer');
+
 class Utils {
-    static isPlainObject(value) {
-        return value != null && typeof value === 'object' && value.constructor === Object && !Array.isArray(value);
+    static value(value, ...args) {
+        return value instanceof Function ? value(...args) : value;
     }
 
-    static deepMergeImmutable(source, target) {
-        const output = structuredClone(target);
+    static when(condition, value, defaultValue = null) {
+        value = this.value(value);
+        condition = this.value(condition, value);
 
-        for (const key in source) {
-            if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        return condition ? value : this.value(defaultValue);
+    }
 
-            const sourceValue = source[key];
+    static with(value, callback){
+        value = this.value(value);
+        return callback(value);
+    }
 
-            if (this.isPlainObject(sourceValue) && this.isPlainObject(output[key])) {
-                output[key] = this.deepMergeImmutable(output[key], sourceValue);
-            } else {
-                output[key] = sourceValue;
-            }
+    static tap(value, callback){
+        value = this.value(value);
+        callback(value);
+
+        return value;
+    }
+
+    static isObject(item) {
+        return item && typeof item === 'object' && !Array.isArray(item);
+    }
+
+    static mergeLists(oldList, newList, strategy) {
+        switch (strategy) {
+            case 'append':
+                return [...oldList, ...newList];
+            case 'append_rp':
+                return [...new Set([...oldList, ...newList])];
+            case 'prepend':
+                return [...newList, ...oldList];
+            case 'prepend_rp':
+                return [...new Set([...newList, ...oldList])];
+            case 'keep':
+                return oldList;
+            case 'replace':
+            default:
+                return newList;
         }
+    }
 
-        return output;
+    static combine(options = {}, ...sources) {
+        const { recursive = false, list_merge = 'replace' } = options;
+
+        return sources.reduce((acc, source) => {
+            const result = { ...acc };
+
+            for (const key in source) {
+                if (Object.prototype.hasOwnProperty.call(source, key)) {
+                    const val = source[key];
+                    const prev = result[key];
+
+                    if (recursive && this.isObject(val) && this.isObject(prev)) {
+                        result[key] = this.combine(options, prev, val);
+                    } else if (Array.isArray(val) && Array.isArray(prev)) {
+                        result[key] = this.mergeLists(prev, val, list_merge);
+                    } else {
+                        result[key] = val;
+                    }
+                }
+            }
+
+            return result;
+        }, {});
     }
 
     static isValidUrl(str) {
@@ -268,6 +407,24 @@ class Utils {
         return value;
     }
 
+    static strChopEnd(value, ...needles) {
+        if (!value) return '';
+        if (needles.length === 0) return value;
+
+        let result = value;
+
+        for (const needle of needles) {
+            if (typeof needle !== 'string') continue;
+            if (needle === '') continue;
+
+            if (result.endsWith(needle)) {
+                result = result.slice(0, -needle.length);
+            }
+        }
+
+        return result;
+    }
+
     static resolveDocumentFileDate(dateStr) {
         const datePart = dateStr.split('T')[0];
         const [year, month, day] = datePart.split('-');
@@ -312,8 +469,7 @@ class Utils {
     static notify(options = {}) {
         if (!Object.hasOwn(options, 'message') || options.message.trim() == '') return;
 
-        let defaults = defaults__['notifications'];
-        toast(this.deepMergeImmutable(defaults, options))
+        toast(this.combine({'recursive': true}, defaults__['notifications'], options))
     }
 
     static log(...args) {
@@ -362,57 +518,91 @@ class Utils {
         return options;
     }
 
-    static httpRequest(options = {}) {
-        if (Object.hasOwn(options, 'before')){
-            const before = options.before;
-            delete options['before'];
-            return new Promise(() => before())
-            .then(
-                new Promise((resolveRequest) => GM.xmlHttpRequest(this.#httpPrepare(options, resolveRequest)))
-            );
-        }
-        return new Promise((resolveRequest) => GM.xmlHttpRequest(this.#httpPrepare(options, resolveRequest)));
-    }
-
-    static httpGet(options = {}) {
-        options.method = 'GET';
-        return this.httpRequest(options);
-    }
-
-    static httpPost(options = {}) {
-        options.method = 'POST';
-        return this.httpRequest(options);
-    }
-
-    static httpPut(options = {}) {
-        options.method = 'PUT';
-        return this.httpRequest(options);
-    }
-
-    static httpPatch(options = {}) {
-        options.method = 'PATCH';
-        return this.httpRequest(options);
-    }
-
-    static httpDelete(options = {}) {
-        options.method = 'DELETE';
-        return this.httpRequest(options);
-    }
-
     static isConfigFieldSelectBool(field) {
         return field['settings']['type'] === 'select' && field['settings']['options'].indexOf('Enabled') > -1 && field['settings']['options'].indexOf('Disabled') > -1
+    }
+
+    static async fromXML(xmlString, options = {}) {
+        if (typeof xmlString !== 'string' || xmlString.trim() === '') return null;
+        
+        const onKey = (options['onKey'] ?? null) instanceof Function ? options['onKey'] : null;
+        const onValue = (options['onValue'] ?? null) instanceof Function ? options['onValue'] : null;
+
+        const xmlDoc = (new DOMParser()).parseFromString(xmlString, 'text/xml');
+        
+        const parseError = xmlDoc.getElementsByTagName('parsererror');
+        if (parseError.length > 0) {
+            console.log("Error parsing XML: " + parseError[0].textContent);
+            return null;
+        }
+
+        function parseNode(node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                return node.nodeValue.trim();
+            }
+
+            const obj = {};
+
+            if (node.attributes && node.attributes.length > 0) {
+                for (let attr of node.attributes) {
+                    const attrKey = onKey ? onKey(`@${attr.name}`) : `@${attr.name}`;
+                    const attrValue = onValue ? onValue(attr.value, attrKey) : attr.value;
+                    obj[attrKey] = attrValue;
+                }
+            }
+
+            if (node.childNodes && node.childNodes.length > 0) {
+                for (let child of node.childNodes) {
+                    if (child.nodeType === Node.TEXT_NODE && !child.nodeValue.trim()) continue;
+
+                    const childKey = onKey ? onKey(child.nodeName) : child.nodeName;
+                    const childValue = onValue ? onValue(parseNode(child), childKey) : parseNode(child);
+
+                    if (child.nodeType === Node.ELEMENT_NODE) {
+                        if (!obj[childKey]) {
+                            obj[childKey] = childValue;
+                        } else {
+                            if (!Array.isArray(obj[childKey])) {
+                                obj[childKey] = [obj[childKey]];
+                            }
+                            obj[childKey].push(childValue);
+                        }
+                    } else if (child.nodeType === Node.TEXT_NODE) {
+                        return childValue;
+                    }
+                }
+            }
+
+            return obj;
+        }
+
+        const primaryKey = onKey ? onKey(xmlDoc.documentElement.nodeName) : xmlDoc.documentElement.nodeName;
+        const primaryValue = onValue ? onValue(parseNode(xmlDoc.documentElement), primaryKey) : parseNode(xmlDoc.documentElement);
+
+        return {
+            [primaryKey]: primaryValue
+        };
     }
 }
 
 class WebDav {
+    static async parseResponse(xmlString) {
+        if (typeof xmlString !== 'string' || xmlString.trim() === '') return null;
+
+        return Utils.fromXML(xmlString, {
+            'onKey': (key) => {
+                return Utils.strChopEnd(Utils.strChopStart(key.trim(), 'd:', 'D:').trim(), ':d', ':D').trim();
+            },
+        });
+    }
+
     static async getHttpReqOptions(extras = {}) {
-        let defaults = defaults__['webdav']['httpReqOptions'];
-        return Utils.deepMergeImmutable(defaults, extras);
+        return Utils.combine({'recursive': true}, defaults__['webdav']['httpReqOptions'], extras);
     }
 
     static async exists(url, depth = 0, options = {}) {
         let httpReqOptions = await this.getHttpReqOptions(options);
-        httpReqOptions = Utils.deepMergeImmutable(httpReqOptions, {
+        httpReqOptions = Utils.combine({'recursive': true}, httpReqOptions, {
             'url': Utils.pathJoin(url),
             'method': 'PROPFIND',
             'headers': {
@@ -423,9 +613,9 @@ class WebDav {
         return GM.xmlHttpRequest(httpReqOptions).then((response) => response.status === 207);
     }
 
-    static async createDirectory(url) {
+    static async createDirectory(url, options = {}) {
         let httpReqOptions = await this.getHttpReqOptions(options);
-        httpReqOptions = deepMergeImmutable(httpReqOptions, {
+        httpReqOptions = combine({'recursive': true}, httpReqOptions, {
             'url': Utils.pathJoin(url),
             'method': 'MKCOL',
         });
@@ -433,7 +623,7 @@ class WebDav {
         return GM.xmlHttpRequest(httpReqOptions).then((response) => response.status === 201);
     }
 
-    static async ensureDirectoryExists(url) {
+    static async ensureDirectoryExists(url, options = {}) {
         let ret = true;
         let parts = [];
         
@@ -441,8 +631,7 @@ class WebDav {
             parts.push(part);
             
             if (idx > 0) {
-                console.log('Create: ', Utils.pathJoin(...parts));
-                ret = await this.createDirectory(Utils.pathJoin(...parts));
+                ret = await this.createDirectory(Utils.pathJoin(...parts), options);
                 if (ret === false){
                     break;
                 }
@@ -450,6 +639,47 @@ class WebDav {
         }
 
         return ret;
+    }
+
+    static async getDirectoryContents(url, depth = 1, options = {}) {
+        let httpReqOptions = await this.getHttpReqOptions(options);
+        
+        httpReqOptions = Utils.combine({'recursive': true}, httpReqOptions, {
+            'url': Utils.pathJoin(url),
+            'method': 'PROPFIND',
+            'headers': {
+                'Accept': 'application/xml',
+                'Depth': (depth <= 0 ? 'infinity' : depth),
+            },
+        });
+        
+        return GM.xmlHttpRequest(httpReqOptions)
+        .then(
+            (response) => response.status === 207 ? this.parseResponse(response.responseText) : null
+        );
+        // .then((items) => {
+        //     if (!items) return null;
+        //     const pathSegments = Utils.pathSegments(httpReqOptions['url']);
+        //     return items.map((item) => {
+        //         return item;
+        //     });
+        // });
+    }
+}
+
+class UI {
+    static toggleModal(id) {
+        const modal = document.getElementById(id);
+        if (!modal) return;
+        
+        const isOpened = modal.hasAttribute('open');
+        if (isOpened) {
+            modal.removeAttribute('open');
+            document.documentElement.classList.remove('modal-is-open');
+        } else {
+            modal.setAttribute('open', true);
+            document.documentElement.classList.add('modal-is-open');
+        }
     }
 }
 
@@ -463,7 +693,7 @@ class ScriptController {
     }
 
     is(of, what = null) {
-        const fieldName = Utils.strCamel(of)
+        const fieldName = Utils.strCamel(of);
         
         if (fieldName == 'casePage') return location.pathname.startsWith('/case-tracker');
 
@@ -488,19 +718,19 @@ class ScriptController {
         return this.#meta.urlSearchParams
     }
 
-    getCase(of = '') {
+    async getCase(of = '') {
         of = of.trim().toLowerCase();
 
         if (of.length == 0) {
             return this.#meta.case
         } else if (['reference', 'ref'].indexOf(of) > -1){
             const caseRef = (!this.is('devMode') ? this.getUrlSearchParams().get('reference') : GM_config.get('devReference')).trim();
-            return caseRef == '' ? 'unknownCaseReference' : caseRef;
+            return caseRef == '' ? null : caseRef;
         } else if (of == 'docs'){
             if (this.is('devMode')){
-                return Utils.httpGet({
-                    url: GM_config.get('devDocs'), 
-                    anonymous: true,
+                return await GM.xmlHttpRequest({
+                    'method': 'GET',
+                    'url': Utils.pathJoin(GM_config.get('devDocs')), 
                 })
                 .then((response) => {
                     if (!response) return [];
@@ -513,7 +743,7 @@ class ScriptController {
             return Utils.pathJoin(
                 GM_config.get('webdavUrl'), 
                 GM_config.get('webdavPath'), 
-                this.getCase('ref').trim()
+                (await this.getCase('ref')).trim(),
             );
         }
 
@@ -526,14 +756,12 @@ class ScriptController {
             GM_config._meta = {}
 
             GM_registerMenuCommand(
-                'Settings',
-                function(event) {
-                    if (!GM_config.isOpen) GM_config.open();
-                },
+                '⚙️ Settings', 
+                (event) => !GM_config.isOpen ? GM_config.open() : null,
                 {
                     'id': 'menuSettings',
                     'title': 'Title - Settings',
-                }
+                },
             );
 
             this.#meta.settings.registered = true;
@@ -544,6 +772,22 @@ class ScriptController {
             if (wasOpen) GM_config.open();
         }
     }
+
+    async initCase() {
+        const caseRef = await this.getCase('ref');
+        if (!caseRef || Object.hasOwn(this.#meta.cases, caseRef)) return;
+        
+        const caseWebdavUrl = await this.getCase('webdavurl');
+        if (! await WebDav.exists(caseWebdavUrl, 0)){
+            await WebDav.ensureDirectoryExists(caseWebdavUrl);
+        }
+
+        const caseFiles = await WebDav.getDirectoryContents(caseWebdavUrl, 1);
+        
+        let docs = [];
+
+        this.#meta.cases[caseRef] = [];
+    }
 }
 
 const vm = new ScriptController();
@@ -551,5 +795,166 @@ const vm = new ScriptController();
 (async function() {
     'use strict';
 
+    const caseWebdavUrl = await vm.getCase('webdavurl');
+    WebDav.getDirectoryContents(caseWebdavUrl, 1).then(async (items) => {
+        console.log({
+            'items': items,
+        })
+        // if (!xmlString){
+        //     console.log({'err': 'err'});
+        //     return;
+        // }
 
+        // const fromXML = await WebDav.parseResponse(xmlString);
+
+        // const fromXML = Utils.fromXML(xmlString, {
+        //     'onKey': (key_) => {
+        //         key_ = Utils.strChopEnd(Utils.strChopStart(key_.trim(), 'd:', 'D:').trim(), ':d', ':D').trim();
+                
+        //         // console.log({
+        //         //     'key_': key_,
+        //         //     'newKey': newKey,
+        //         // })
+        //         return key_;
+        //     }
+        // });
+        // console.log(JSON.stringify(fromXML, null, 2));
+        
+        // const xmlDoc = (new DOMParser()).parseFromString(xmlString, "text/xml");
+        // const pathSegments = Utils.pathSegments(caseWebdavUrl);
+        // const responses = Utils.when(
+        //     (items) => items.length > 0, 
+        //     () => Array.from(xmlDoc.getElementsByTagName('d:response')), 
+        //     () => Array.from(xmlDoc.getElementsByTagName('D:response')),
+        // )
+        // .map((item) => {
+        //     // const pathRel = Utils.pathJoin(item.getElementsByTagName("d:href")[0]?.textContent);
+        //     const newItem = {
+        //         'href': item.getElementsByTagName("d:href")[0]?.textContent ?? 'Unknown',
+        //         // 'path': {
+        //         //     'rel': pathRel,
+        //         //     'full': Utils.pathJoin(pathSegments[0], pathRel),
+        //         // },
+        //     };
+        //     return newItem;
+        // });
+
+        // console.log({
+        //     'responses': responses,
+        // })
+
+        // console.log(JSON.stringify(xmlDoc, null, 2));
+    });
+
+    // vm.getCase('ref').then((ref_) => {
+    //     if (ref_ == '') return;
+    //     caseFilesHeader.querySelector('h3').innerText = `Case Files - Reference: ${ref_}`;
+
+    // });
+
+    // GM_registerMenuCommand("📁 Case Files", () => {
+    //     UI.toggleModal("caseFilesContainer");
+    // });
+
+    // UI.toggleModal("caseFilesContainer");
+    
+    // await vm.getCase('docs')
+    // .then(async (docs) => {
+    //     const caseUrl = await vm.getCase('webdavurl');
+    //     let resolved = [];
+
+    //     for (const doc of docs) {
+    //         const fileName = Utils.resolveDocumentFileName(doc);
+    //         const fileDst = Utils.pathJoin(caseUrl, fileName);
+    //         const fileExists = await WebDav.exists(fileDst);
+    //         resolved.push({
+    //             'id': doc['documentId'],
+    //             'date': doc['documentDate'],
+    //             'fileName': fileName,
+    //             'src': doc['fileUrl'],
+    //             'dst': fileDst,
+    //             'exists': fileExists,
+    //         });
+    //     }
+
+    //     return resolved
+    // })
+    // .then(async (resolved) => {
+    //     const table = document.createElement('table');
+    //     const thead = document.createElement('thead');
+    //     const tbody = document.createElement('tbody');
+    //     const headerRow = document.createElement('tr');
+
+    //     for (const header of ['Sync', 'ID', 'Date', 'File Name', 'Exists']) {
+    //         const th = document.createElement('th');
+    //         // th.classList.add('text-center');
+    //         th.setAttribute('scope', 'col');
+    //         th.textContent = header;
+    //         headerRow.appendChild(th);
+    //     }
+
+    //     thead.appendChild(headerRow);
+
+    //     for (const doc of resolved) {
+    //         const row = document.createElement('tr');
+    //         row.setAttribute('data-case-id', doc['id']);
+    //         row.setAttribute('data-case-status', (doc['exists'] ? 'exists' : 'missing'));
+    //         row.innerHTML = `
+    //             <td class="text-center"><input type="checkbox" class="case-file-checkbox" data-status="${(doc['exists'] ? 'exists' : 'missing')}" value="${doc['id']}"${(doc['exists'] ? '' : ' checked')}></td>
+    //             <td>${doc['id']}</td>
+    //             <td>${doc['date']}</td>
+    //             <td>${doc['fileName']}</td>
+    //             <td class="text-center" class="case-file-exists">${(doc['exists'] ? "✅" : "❌")}</td>
+    //         `;
+    //         tbody.appendChild(row);
+    //     }
+
+    //     table.appendChild(thead);
+    //     table.appendChild(tbody);
+
+    //     caseFilesBody.innerHTML = table.outerHTML;
+
+    //     const containerActionButtons = document.createElement('div');
+    //     containerActionButtons.classList.add('grid');
+        
+    //     for (const btnText of ['Select All', 'Unselect All', 'Select Missing']){
+    //         const btnSelect = document.createElement('button');
+    //         btnSelect.innerText = btnText;
+    //         btnSelect.classList.add('outline', 'secondary', 'btn-sm');
+            
+    //         btnSelect.addEventListener('click', (e) => {
+    //             const actionOp = Utils.strCamel(e.target.innerText);
+                
+    //             for (const checkBox of caseFilesBody.querySelectorAll('input.case-file-checkbox')){
+    //                 if (actionOp === 'selectAll') {
+    //                     checkBox.setAttribute('checked', '');
+    //                 }else if (actionOp === 'unselectAll') {
+    //                     checkBox.removeAttribute('checked');
+    //                 }else if (actionOp === 'selectMissing'){
+    //                     if (checkBox.getAttribute('data-status') === 'missing'){
+    //                         checkBox.setAttribute('checked', '');
+    //                     }else {
+    //                         checkBox.removeAttribute('checked');
+    //                     }
+    //                 }
+    //             }
+    //         });
+
+    //         containerActionButtons.appendChild(btnSelect);
+    //     }
+        
+    //     const btnSync = document.createElement('button');
+    //     btnSync.innerText = 'Synchronise Selected';
+    //     btnSync.classList.add('btn-sm');
+    //     containerActionButtons.appendChild(btnSync);
+
+    //     caseFilesFooter.appendChild(containerActionButtons);
+    // });
+    
+
+    // vm.getCase('docs').then((result) => {
+    //     console.log({
+    //         'result': result,
+    //     })
+    // });
 })();
