@@ -26,19 +26,19 @@
 // @resource     CSS_PICO https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css
 // ==/UserScript==
 
-const htmlCaseFilesContainer = `
+const htmlContent = `
 <dialog id="caseFilesContainer">
-  <article>
-    <header>
-      <button aria-label="Close" rel="prev" class="close-modal" onclick="document.getElementById('caseFiles').removeAttribute('open')"></button>
-      <h3>Case Files</h3>
-    </header>
-    <div class="text-center"><h3>Loading Case Files</h3><span aria-busy="true"></span></div>
-    <footer>
-      
-    </footer>
-  </article>
-</dialog>`;
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" class="close-modal"></button>
+            <h3>Case Files</h3>
+        </header>
+        <div class="text-center"><h3>Loading Case Files</h3><span aria-busy="true"></span></div>
+        <footer>
+        </footer>
+    </article>
+</dialog>
+`;
 
 const htmlCss = `
     :root {
@@ -111,7 +111,6 @@ const defaults__ = {
             'registered': false,
         },
         'urlSearchParams': null,
-        'webdavClient': null,
         'cases': {},
     },
     'notifications': {
@@ -221,20 +220,6 @@ const defaults__ = {
     }
 }
 
-GM_addStyle(GM_getResourceText("CSS_TOAST"));
-GM_addStyle(GM_getResourceText("CSS_PICO"));
-GM_addStyle(htmlCss);
-
-const gmContainer = document.createElement('div');
-gmContainer.id = 'gmContainer';
-gmContainer.innerHTML = htmlCaseFilesContainer;
-document.body.appendChild(gmContainer);
-
-const caseFilesContainer = document.getElementById('caseFilesContainer');
-const caseFilesHeader = caseFilesContainer.querySelector('article > header');
-const caseFilesBody = caseFilesContainer.querySelector('article > div');
-const caseFilesFooter = caseFilesContainer.querySelector('article > footer');
-
 class Utils {
     static value(value, ...args) {
         return value instanceof Function ? value(...args) : value;
@@ -242,7 +227,7 @@ class Utils {
 
     static when(condition, value, defaultValue = null) {
         value = this.value(value);
-        condition = this.value(condition, value);
+        condition = condition instanceof Function ? condition(value) : condition;
 
         return condition ? value : this.value(defaultValue);
     }
@@ -641,6 +626,23 @@ class WebDav {
         return ret;
     }
 
+    static resolveFileItem(item, baseUrl) {
+        const pathRel = Utils.pathJoin(item['href']);
+        const isDir = (item?.propstat?.prop?.resourcetype?.collection ?? null) !== null;
+        return {
+            'etag': item?.propstat?.prop?.getetag ?? null,
+            'isDir': isDir,
+            'isFile': !isDir,
+            'lastmodified': item?.propstat?.prop?.lastmodified ?? null,
+            'contentType': item?.propstat?.prop?.getcontenttype ?? null,
+            'displayName': item?.propstat?.prop?.displayname ?? null,
+            'path': {
+                'rel': pathRel,
+                'full': Utils.pathJoin(baseUrl, pathRel),
+            },
+        };
+    }
+
     static async getDirectoryContents(url, depth = 1, options = {}) {
         let httpReqOptions = await this.getHttpReqOptions(options);
         
@@ -653,32 +655,50 @@ class WebDav {
             },
         });
         
+        const pathSegments = Utils.pathSegments(httpReqOptions['url']);
+
         return GM.xmlHttpRequest(httpReqOptions)
         .then(
-            (response) => response.status === 207 ? this.parseResponse(response.responseText) : null
-        );
-        // .then((items) => {
-        //     if (!items) return null;
-        //     const pathSegments = Utils.pathSegments(httpReqOptions['url']);
-        //     return items.map((item) => {
-        //         return item;
-        //     });
-        // });
+            (response) => response.status === 207 ? response.responseText : null
+        )
+        .then(async (xmlString) => {
+            return (await this.parseResponse(xmlString))?.multistatus?.response ?? null;
+        })
+        .then((items) => {
+            if (!items) return null;
+            return items.map((item) => this.resolveFileItem(item, pathSegments[0]));
+        })
     }
 }
 
 class UI {
+    static isModelOpen(id) {
+        return Utils.with(
+            document.getElementById(id),
+            (modal) => modal ? modal.hasAttribute('open') && modal.getAttribute('open') === true : null,
+        );
+    }
+
+    static openModel(id) {
+        if (UI.isModelOpen(id) !== false) return;
+
+        document.getElementById(id).setAttribute('open', true);
+        document.documentElement.classList.add('modal-is-open');    
+    }
+
+    static closeModel(id) {
+        if (UI.isModelOpen(id) !== true) return;
+
+        document.getElementById(id).removeAttribute('open');
+        document.documentElement.classList.remove('modal-is-open');
+    }
+
     static toggleModal(id) {
-        const modal = document.getElementById(id);
-        if (!modal) return;
-        
-        const isOpened = modal.hasAttribute('open');
-        if (isOpened) {
-            modal.removeAttribute('open');
-            document.documentElement.classList.remove('modal-is-open');
-        } else {
-            modal.setAttribute('open', true);
-            document.documentElement.classList.add('modal-is-open');
+        const isModelOpen = UI.isModelOpen(id);
+        if (isModelOpen === true){
+            UI.closeModel(id);
+        }else if (isModelOpen === false) {
+            UI.openModel(id);
         }
     }
 }
@@ -688,89 +708,73 @@ class ScriptController {
 
     constructor() {
         this.#meta = defaults__['meta'];
-        this.GMConfigInit();
+
+        GM_addStyle(GM_getResourceText("CSS_TOAST"));
+        
         this.#meta.urlSearchParams = new URLSearchParams(window.location.search);
+
+        GM_config.init(defaults__['config']);
+        GM_config._meta = {}
+        GM_registerMenuCommand('⚙️ Settings', () => !GM_config.isOpen ? GM_config.open() : null);
+
+        if (this.hasCaseRef()) {
+            GM_registerMenuCommand("📁 Case Files", () => UI.toggleModal('caseFilesContainer'));
+            GM_addStyle(GM_getResourceText("CSS_PICO"));
+            GM_addStyle(htmlCss);
+            Utils.tap(
+                document.createElement('div'),
+                (gmContainer) => {
+                    gmContainer.id = 'gmContainer';
+                    gmContainer.innerHTML = htmlContent;
+                    document.body.appendChild(gmContainer);
+                }
+            );
+        }
     }
 
-    is(of, what = null) {
-        const fieldName = Utils.strCamel(of);
-        
-        if (fieldName == 'casePage') return location.pathname.startsWith('/case-tracker');
+    isDevMode() {
+        return GM_config.get('devMode') === 'Enabled';
+    }
 
-        const field = GM_config.fields[fieldName];
-        
-        if (typeof field === 'undefined') {
-            Utils.notify({'message': `Config field name [${of}] is invalid!`});
-            return null;
+    isCasePage() {
+        return this.isDevMode() || location.pathname.startsWith('/case-tracker');
+    }
+
+    getCaseRef() {
+        const caseRef = (!this.isDevMode() ? this.getUrlSearchParams().get('reference') : GM_config.get('devReference')).trim();
+        return !caseRef || caseRef === '' ? null : caseRef;
+    }
+
+    hasCaseRef() {
+        return this.getCaseRef() !== null;
+    }
+
+    getWebdavUrl(...paths) {
+        const webdavUrl = Utils.pathJoin(GM_config.get('webdavUrl')).trim();
+        if (!Utils.isValidUrl(webdavUrl)) return null;
+
+        return Utils.pathJoin(
+            webdavUrl, 
+            GM_config.get('webdavPath'),
+            ...paths,
+        );
+    }
+
+    async getCaseDocs() {
+        if (this.isDevMode()){
+            return await GM.xmlHttpRequest({
+                'method': 'GET',
+                'url': Utils.pathJoin(GM_config.get('devDocs')), 
+            })
+            .then((response) => {
+                if (!response) return [];
+                return JSON.parse(response.responseText).documents ?? [];
+            });
         }
-        
-        if (what) return GM_config.get(of) === what;
-
-        if (Utils.isConfigFieldSelectBool(field)){
-            return GM_config.get(fieldName) === 'Enabled';
-        } else {
-            Utils.notify(`Value if required to compare [${of}] field!`)
-            return null;
-        } 
     }
 
     getUrlSearchParams() {
         return this.#meta.urlSearchParams
-    }
-
-    async getCase(of = '') {
-        of = of.trim().toLowerCase();
-
-        if (of.length == 0) {
-            return this.#meta.case
-        } else if (['reference', 'ref'].indexOf(of) > -1){
-            const caseRef = (!this.is('devMode') ? this.getUrlSearchParams().get('reference') : GM_config.get('devReference')).trim();
-            return caseRef == '' ? null : caseRef;
-        } else if (of == 'docs'){
-            if (this.is('devMode')){
-                return await GM.xmlHttpRequest({
-                    'method': 'GET',
-                    'url': Utils.pathJoin(GM_config.get('devDocs')), 
-                })
-                .then((response) => {
-                    if (!response) return [];
-                    return JSON.parse(response.responseText).documents ?? [];
-                });
-            }
-
-            return [];
-        }else if (of == 'webdavurl'){
-            return Utils.pathJoin(
-                GM_config.get('webdavUrl'), 
-                GM_config.get('webdavPath'), 
-                (await this.getCase('ref')).trim(),
-            );
-        }
-
-        return this.#meta.case[of]
-    }
-
-    GMConfigInit(extras = {}) {
-        if (!this.#meta.settings.registered) {
-            GM_config.init(defaults__['config']);
-            GM_config._meta = {}
-
-            GM_registerMenuCommand(
-                '⚙️ Settings', 
-                (event) => !GM_config.isOpen ? GM_config.open() : null,
-                {
-                    'id': 'menuSettings',
-                    'title': 'Title - Settings',
-                },
-            );
-
-            this.#meta.settings.registered = true;
-        }else {
-            const wasOpen = GM_config.isOpen;
-            if (wasOpen) GM_config.close();
-            GM_config.init(extras);
-            if (wasOpen) GM_config.open();
-        }
     }
 
     async initCase() {
@@ -788,6 +792,30 @@ class ScriptController {
 
         this.#meta.cases[caseRef] = [];
     }
+
+    getGmContainer() {
+        return document.getElementById('gmContainer');
+    }
+
+    getCaseFilesContainer() {
+        return this.getGmContainer()?.querySelector('#caseFilesContainer');
+    }
+
+    getCaseFilesHeader() {
+        return this.getCaseFilesContainer()?.querySelector('article > header');
+    }
+
+    getCaseFilesBody() {
+        return this.getCaseFilesContainer()?.querySelector('article > div');
+    }
+
+    getCaseFilesFooter() {
+        return this.getCaseFilesContainer()?.querySelector('article > footer');
+    }
+
+    getMeta() {
+        return this.#meta;
+    }
 }
 
 const vm = new ScriptController();
@@ -795,56 +823,15 @@ const vm = new ScriptController();
 (async function() {
     'use strict';
 
-    const caseWebdavUrl = await vm.getCase('webdavurl');
-    WebDav.getDirectoryContents(caseWebdavUrl, 1).then(async (items) => {
-        console.log({
-            'items': items,
-        })
-        // if (!xmlString){
-        //     console.log({'err': 'err'});
-        //     return;
-        // }
-
-        // const fromXML = await WebDav.parseResponse(xmlString);
-
-        // const fromXML = Utils.fromXML(xmlString, {
-        //     'onKey': (key_) => {
-        //         key_ = Utils.strChopEnd(Utils.strChopStart(key_.trim(), 'd:', 'D:').trim(), ':d', ':D').trim();
-                
-        //         // console.log({
-        //         //     'key_': key_,
-        //         //     'newKey': newKey,
-        //         // })
-        //         return key_;
-        //     }
-        // });
-        // console.log(JSON.stringify(fromXML, null, 2));
-        
-        // const xmlDoc = (new DOMParser()).parseFromString(xmlString, "text/xml");
-        // const pathSegments = Utils.pathSegments(caseWebdavUrl);
-        // const responses = Utils.when(
-        //     (items) => items.length > 0, 
-        //     () => Array.from(xmlDoc.getElementsByTagName('d:response')), 
-        //     () => Array.from(xmlDoc.getElementsByTagName('D:response')),
-        // )
-        // .map((item) => {
-        //     // const pathRel = Utils.pathJoin(item.getElementsByTagName("d:href")[0]?.textContent);
-        //     const newItem = {
-        //         'href': item.getElementsByTagName("d:href")[0]?.textContent ?? 'Unknown',
-        //         // 'path': {
-        //         //     'rel': pathRel,
-        //         //     'full': Utils.pathJoin(pathSegments[0], pathRel),
-        //         // },
-        //     };
-        //     return newItem;
-        // });
-
-        // console.log({
-        //     'responses': responses,
-        // })
-
-        // console.log(JSON.stringify(xmlDoc, null, 2));
-    });
+    console.log(vm.getCaseFilesFooter());
+    // console.log(vm.hasCaseRef());
+    // console.log(vm.getWebdavUrl('sadsad', 'sdsadsa'));
+    // await vm.initCase();
+    // const caseWebdavUrl = await vm.getCase('webdavurl');
+    // WebDav.getDirectoryContents(caseWebdavUrl, 1).then(async (final) => {
+    //     console.log(final);
+    //     // console.log(JSON.stringify(final, null, 2));
+    // });
 
     // vm.getCase('ref').then((ref_) => {
     //     if (ref_ == '') return;
